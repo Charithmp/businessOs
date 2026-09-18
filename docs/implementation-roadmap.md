@@ -8,7 +8,7 @@ The codebase uses a modular-monolith API and isolated provider interfaces. Phase
 | 1 Identity and tenancy | Started | Data model, scope guard, permission guard, support access model |
 | 2 Catalog and subscriptions | Started | Catalog/subscription schema and entitlement resolver contract |
 | 3 Logs and observability | Started | Audit/system log models, trace header and redaction utility |
-| 4 Website, AI and domains | Planned | Versioned component tree, AI/provider and DNS adapters |
+| 4 Website, AI and domains | Started | Versioned component tree, publish/rollback deployment records, AI gateway contract and DNS verification boundary |
 | 5 CRM and WhatsApp | Planned | CRM/inbox data model and webhook adapter |
 | 6 Appointments and Zoom | Planned | Calendar domain and meeting adapter |
 | 7 Meta and LinkedIn Ads | Planned | OAuth/provider sync workers and local analytics |
