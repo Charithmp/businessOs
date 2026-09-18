@@ -40,6 +40,41 @@ enum AuditAction {
   PUBLISH
 }
 
+enum WebsiteStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum WebsiteVersionStatus {
+  DRAFT
+  READY
+  PUBLISHED
+  ROLLED_BACK
+}
+
+enum DomainStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  SSL_PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+enum DeploymentStatus {
+  QUEUED
+  BUILDING
+  READY
+  FAILED
+  ROLLED_BACK
+}
+
+enum AiRequestStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
 model User {
   id           String               @id @default(cuid())
   email        String               @unique
@@ -78,6 +113,10 @@ model Organization {
   subscriptions Subscription[]
   auditLogs     AuditLog[]
   supportAccess SupportAccess[]
+  websites      Website[]
+  domains       Domain[]
+  deployments   Deployment[]
+  aiRequests    AiRequest[]
 
   @@index([parentId, type, status])
 }
@@ -255,4 +294,113 @@ model SupportAccess {
   organization   Organization @relation(fields: [organizationId], references: [id])
 
   @@index([organizationId, expiresAt])
+}
+
+model Website {
+  id                 String           @id @default(cuid())
+  organizationId     String
+  name               String
+  slug               String
+  status             WebsiteStatus    @default(DRAFT)
+  publishedVersionId String?          @unique
+  organization       Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  versions           WebsiteVersion[] @relation("WebsiteVersions")
+  publishedVersion   WebsiteVersion?  @relation("PublishedWebsiteVersion", fields: [publishedVersionId], references: [id])
+  domains            Domain[]
+  deployments        Deployment[]
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, status])
+}
+
+model WebsiteVersion {
+  id            String               @id @default(cuid())
+  websiteId     String
+  number        Int
+  status        WebsiteVersionStatus @default(DRAFT)
+  componentTree Json
+  createdById   String?
+  website       Website              @relation("WebsiteVersions", fields: [websiteId], references: [id], onDelete: Cascade)
+  publishedBy   Website?             @relation("PublishedWebsiteVersion")
+  deployments   Deployment[]
+  createdAt     DateTime             @default(now())
+
+  @@unique([websiteId, number])
+  @@index([websiteId, status])
+}
+
+model WebsiteTemplate {
+  id             String   @id @default(cuid())
+  organizationId String?
+  name           String
+  slug           String   @unique
+  componentTree  Json
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+}
+
+model Domain {
+  id                String       @id @default(cuid())
+  organizationId    String
+  websiteId         String
+  hostname          String       @unique
+  status            DomainStatus @default(PENDING_VERIFICATION)
+  verificationToken String       @unique
+  verifiedAt        DateTime?
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  website           Website      @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([organizationId, status])
+  @@index([websiteId, status])
+}
+
+model Deployment {
+  id               String           @id @default(cuid())
+  organizationId   String
+  websiteId        String
+  websiteVersionId String
+  status           DeploymentStatus @default(QUEUED)
+  immutableRef     String           @unique
+  error            String?
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  website          Website          @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  version          WebsiteVersion   @relation(fields: [websiteVersionId], references: [id], onDelete: Cascade)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@index([organizationId, status])
+  @@index([websiteId, createdAt])
+}
+
+model AiProvider {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model AiRequest {
+  id             String          @id @default(cuid())
+  organizationId String
+  provider       String
+  model          String
+  requestType    String
+  fingerprint    String
+  status         AiRequestStatus @default(PENDING)
+  input          Json?
+  output         Json?
+  tokenCount     Int?
+  estimatedCost  Decimal?        @db.Decimal(18, 6)
+  latencyMs      Int?
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime        @default(now())
+
+  @@unique([organizationId, fingerprint])
+  @@index([organizationId, createdAt])
+  @@index([provider, model, createdAt])
 }

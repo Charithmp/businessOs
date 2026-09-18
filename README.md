@@ -11,6 +11,8 @@ This repository starts the implementation plan with Phases 0 through 3:
 3. **Catalog and subscriptions** - versioned packages, features, subscriptions, limits, history and entitlement resolution contracts.
 4. **Audit and observability** - append-only audit records, structured application logging, trace correlation and redaction helpers.
 
+Phase 4 is now underway with versioned, safe component trees; immutable publish/deployment records; a local site-planning adapter behind an AI Gateway contract; and tenant-scoped domain verification instructions. External AI, DNS, SSL and deployment adapters remain deliberately replaceable.
+
 The remaining document phases are represented as bounded module folders and implementation backlog in [docs/implementation-roadmap.md](docs/implementation-roadmap.md).
 
 ## Run locally
