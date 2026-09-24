@@ -1,5 +1,7 @@
 packages:
   - apps/*
   - packages/*
+enableGlobalVirtualStore: false
 allowBuilds:
-  '@nestjs/core': set this to true or false
+  '@nestjs/core': true
+  'unrs-resolver': true

@@ -1,0 +1,112 @@
+const assert = require('node:assert/strict');
+const { randomUUID, randomBytes, scryptSync } = require('node:crypto');
+const { Client } = require('pg');
+require('reflect-metadata');
+const { NestFactory } = require('@nestjs/core');
+const { ValidationPipe } = require('@nestjs/common');
+const { AppModule } = require('../dist/app.module');
+
+async function main() {
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  await db.connect();
+  const tag = randomUUID().slice(0,8);
+  const platformId = randomUUID();
+  const ownerId = randomUUID();
+  const password = 'TestPassword123!';
+  const salt = randomBytes(16).toString('hex');
+  const hash = `${salt}:${scryptSync(password,salt,64).toString('hex')}`;
+  await db.query('INSERT INTO users(id,email,password_hash) VALUES($1,$2,$3)',[ownerId,`owner-${tag}@example.test`,hash]);
+  await db.query("INSERT INTO organizations(id,type,name,slug) VALUES($1,'PLATFORM',$2,$3)",[platformId,'Test Platform',`platform-${tag}`]);
+  await db.query('INSERT INTO organization_members(organization_id,user_id,role_id) VALUES($1,$2,$3)',[platformId,ownerId,'00000000-0000-4000-8000-000000000001']);
+  const app = await NestFactory.create(AppModule,{ logger:false });
+  app.setGlobalPrefix('api/v1');
+  app.useGlobalPipes(new ValidationPipe({ transform:true,whitelist:true,forbidNonWhitelisted:true }));
+  await app.listen(0,'127.0.0.1');
+  const address = app.getHttpServer().address();
+  const base = `http://127.0.0.1:${address.port}/api/v1`;
+  async function call(method,path,body,cookie,origin) {
+    const response = await fetch(base+path,{ method,headers:{ ...(body?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{}),...(origin?{origin}:{}) },body:body?JSON.stringify(body):undefined });
+    const data = await response.json();
+    return { status:response.status,data,cookie:response.headers.get('set-cookie')?.split(';')[0] };
+  }
+  try {
+    assert.equal((await call('GET','/health')).status,200);
+    assert.equal((await call('GET','/me')).status,401);
+    const owner = await call('POST','/auth/login',{email:`owner-${tag}@example.test`,password});
+    assert.equal(owner.status,201);
+    assert.match(owner.cookie,/bos_session=/);
+    const agencyA = await call('POST','/organizations',{parentId:platformId,type:'AGENCY',name:'Agency A',slug:`agency-a-${tag}`},owner.cookie);
+    const agencyB = await call('POST','/organizations',{parentId:platformId,type:'AGENCY',name:'Agency B',slug:`agency-b-${tag}`},owner.cookie);
+    assert.equal(agencyA.status,201);
+    assert.equal(agencyB.status,201);
+    const businessA = await call('POST','/organizations',{parentId:agencyA.data.id,type:'BUSINESS',name:'Business A',slug:`business-a-${tag}`},owner.cookie);
+    const businessB = await call('POST','/organizations',{parentId:agencyB.data.id,type:'BUSINESS',name:'Business B',slug:`business-b-${tag}`},owner.cookie);
+    assert.equal(businessA.status,201);
+    assert.equal(businessB.status,201);
+    const a = await call('POST','/auth/register',{email:`a-${tag}@example.test`,password});
+    const b = await call('POST','/auth/register',{email:`b-${tag}@example.test`,password});
+    const agencyUser = await call('POST','/auth/register',{email:`agency-${tag}@example.test`,password});
+    const adminUser = await call('POST','/auth/register',{email:`admin-${tag}@example.test`,password});
+    const supportUser = await call('POST','/auth/register',{email:`support-${tag}@example.test`,password});
+    assert.equal(a.status,201); assert.equal(b.status,201);
+    assert.equal(agencyUser.status,201); assert.equal(adminUser.status,201); assert.equal(supportUser.status,201);
+    assert.equal((await call('POST',`/organizations/${businessA.data.id}/members`,{email:`a-${tag}@example.test`,role:'OWNER'},owner.cookie)).status,201);
+    assert.equal((await call('POST',`/organizations/${businessB.data.id}/members`,{email:`b-${tag}@example.test`,role:'OWNER'},owner.cookie)).status,201);
+    const aLogin = await call('POST','/auth/login',{email:`a-${tag}@example.test`,password});
+    const bLogin = await call('POST','/auth/login',{email:`b-${tag}@example.test`,password});
+    assert.equal((await call('POST',`/organizations/${agencyA.data.id}/members`,{email:`agency-${tag}@example.test`,role:'OWNER'},owner.cookie)).status,201);
+    const agencyLogin = await call('POST','/auth/login',{email:`agency-${tag}@example.test`,password});
+    assert.equal((await call('GET',`/organizations/${businessA.data.id}`,undefined,agencyLogin.cookie)).status,200);
+    assert.equal((await call('GET',`/organizations/${businessB.data.id}`,undefined,agencyLogin.cookie)).status,403);
+    assert.equal((await call('GET',`/organizations/${agencyB.data.id}`,undefined,agencyLogin.cookie)).status,403);
+    const agencyList = await call('GET','/organizations',undefined,agencyLogin.cookie);
+    assert.equal(agencyList.status,200);
+    assert.equal(agencyList.data.some((org)=>org.id===businessB.data.id),false);
+    assert.equal((await call('POST',`/organizations/${agencyA.data.id}/members`,{email:`admin-${tag}@example.test`,role:'ADMIN'},agencyLogin.cookie)).status,201);
+    const adminLogin = await call('POST','/auth/login',{email:`admin-${tag}@example.test`,password});
+    assert.equal((await call('POST',`/organizations/${agencyA.data.id}/members`,{email:`b-${tag}@example.test`,role:'OWNER'},adminLogin.cookie)).status,403);
+    assert.equal((await call('POST',`/organizations/${agencyA.data.id}/members`,{email:`agency-${tag}@example.test`,role:'MEMBER'},adminLogin.cookie)).status,403);
+    assert.equal((await call('GET',`/organizations/${businessA.data.id}`,undefined,aLogin.cookie)).status,200);
+    assert.equal((await call('GET',`/organizations/${businessB.data.id}`,undefined,aLogin.cookie)).status,403);
+    assert.equal((await call('GET',`/organizations/${businessA.data.id}`,undefined,bLogin.cookie)).status,403);
+    assert.equal((await call('POST','/organizations/switch',{organizationId:businessB.data.id},aLogin.cookie)).status,403);
+    assert.equal((await call('POST','/organizations/switch',{organizationId:businessA.data.id},aLogin.cookie)).status,201);
+    assert.equal((await call('GET','/me',undefined,aLogin.cookie)).data.organizationId,businessA.data.id);
+    assert.equal((await call('POST',`/organizations/${businessB.data.id}/members`,{email:`a-${tag}@example.test`,role:'OWNER'},aLogin.cookie)).status,403);
+    assert.equal((await call('POST','/organizations/switch',{organizationId:businessA.data.id},aLogin.cookie,'https://evil.example')).status,403);
+    const refreshed = await call('POST','/auth/refresh',undefined,bLogin.cookie);
+    assert.equal(refreshed.status,201);
+    assert.notEqual(refreshed.cookie,bLogin.cookie);
+    assert.equal((await call('GET','/me',undefined,bLogin.cookie)).status,401);
+    assert.equal((await call('GET','/me',undefined,refreshed.cookie)).status,200);
+    assert.equal((await call('POST',`/organizations/${platformId}/members`,{email:`support-${tag}@example.test`,role:'OWNER'},owner.cookie)).status,201);
+    const supportLogin = await call('POST','/auth/login',{email:`support-${tag}@example.test`,password});
+    assert.equal((await call('GET',`/organizations/${businessB.data.id}`,undefined,supportLogin.cookie)).status,403);
+    const supportGrant = await call('POST',`/organizations/${businessB.data.id}/support-access`,{reason:'Investigate customer issue',minutes:5},supportLogin.cookie);
+    assert.equal(supportGrant.status,201);
+    assert.equal((await call('GET',`/organizations/${businessB.data.id}`,undefined,supportLogin.cookie)).status,200);
+    assert.equal((await call('POST',`/support-access/${supportGrant.data.id}/revoke`,undefined,supportLogin.cookie)).status,201);
+    assert.equal((await call('GET',`/organizations/${businessB.data.id}`,undefined,supportLogin.cookie)).status,403);
+    const audited = await db.query("SELECT action FROM audit_logs WHERE organization_id=$1 AND actor_user_id=$2 AND action IN ('support_access.granted','support_access.revoked') ORDER BY created_at",[businessB.data.id,supportUser.data.id]);
+    assert.deepEqual(audited.rows.map((row)=>row.action),['support_access.granted','support_access.revoked']);
+    assert.equal((await call('POST','/auth/logout',undefined,aLogin.cookie)).status,201);
+    assert.equal((await call('GET','/me',undefined,aLogin.cookie)).status,401);
+    console.log('Phase 1 end-to-end checks passed: health, auth, business and agency isolation, ID scope, role escalation, switch, origin, session rotation, audited support access, logout');
+  } finally {
+    await app.close();
+    const orgs = await db.query('SELECT id,type FROM organizations WHERE slug LIKE $1',[`%${tag}`]);
+    const ids = orgs.rows.map((row)=>row.id);
+    const users = await db.query('SELECT id FROM users WHERE email LIKE $1',[`%-${tag}@example.test`]);
+    const userIds = users.rows.map((row)=>row.id);
+    if (userIds.length) await db.query('DELETE FROM sessions WHERE user_id=ANY($1::uuid[])',[userIds]);
+    if (ids.length) {
+      await db.query('DELETE FROM audit_logs WHERE organization_id=ANY($1::uuid[])',[ids]);
+      await db.query('DELETE FROM support_access WHERE organization_id=ANY($1::uuid[])',[ids]);
+      await db.query('DELETE FROM organization_members WHERE organization_id=ANY($1::uuid[])',[ids]);
+      for (const type of ['BUSINESS','AGENCY','PLATFORM']) await db.query('DELETE FROM organizations WHERE id=ANY($1::uuid[]) AND type=$2',[ids,type]);
+    }
+    if (userIds.length) await db.query('DELETE FROM users WHERE id=ANY($1::uuid[])',[userIds]);
+    await db.end();
+  }
+}
+main().catch((error)=>{ console.error(error); process.exitCode=1; });

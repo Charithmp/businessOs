@@ -2,12 +2,17 @@
   "name": "@business-os/api",
   "private": true,
   "scripts": {
-    "dev": "nest start --watch",
+    "dev": "node --env-file=../../.env node_modules/@nestjs/cli/bin/nest.js start --watch",
     "build": "nest build",
-    "start": "node dist/main",
+    "start": "node --env-file=../../.env dist/main",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint 'src/**/*.ts'",
-    "test": "jest --runInBand"
+    "lint": "eslint src --ext .ts",
+    "test": "jest --runInBand",
+    "migrate": "node --env-file=../../.env scripts/migrate.cjs",
+    "bootstrap": "node --env-file=../../.env scripts/bootstrap.cjs",
+    "test:e2e": "node --env-file=../../.env test/e2e.cjs",
+    "test:full-stack": "node --env-file=../../.env test/full-stack.cjs",
+    "test:commercial-e2e": "node --env-file=../../.env test/commercial-e2e.cjs"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",
@@ -16,6 +21,7 @@
     "@nestjs/swagger": "^7.4.2",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
+    "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
@@ -24,6 +30,9 @@
     "@nestjs/testing": "^10.4.15",
     "@types/jest": "^29.5.14",
     "@types/node": "^22.10.2",
+    "@types/pg": "^8.23.1",
+    "@typescript-eslint/eslint-plugin": "^8.70.0",
+    "@typescript-eslint/parser": "^8.70.0",
     "eslint": "^8.57.1",
     "jest": "^29.7.0",
     "ts-jest": "^29.2.5",
