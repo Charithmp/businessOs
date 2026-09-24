@@ -3,14 +3,36 @@ on: [push, pull_request]
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: business_os
+          POSTGRES_USER: business_os
+          POSTGRES_PASSWORD: business_os
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U business_os -d business_os"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6380:6379"]
+    env:
+      DATABASE_URL: postgresql://business_os:business_os@127.0.0.1:5433/business_os?schema=public
+      REDIS_URL: redis://127.0.0.1:6380
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: pnpm }
       - uses: pnpm/action-setup@v4
         with: { version: 11.19.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm --filter @business-os/api migrate
+      - run: pnpm --filter @business-os/api test:e2e
+      - run: pnpm --filter @business-os/api test:full-stack
+      - run: pnpm --filter @business-os/api test:commercial-e2e

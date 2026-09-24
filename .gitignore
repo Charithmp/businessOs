@@ -4,3 +4,8 @@ node_modules/
 dist/
 coverage/
 *.log
+*.tsbuildinfo
+.pnpm-store/
+graphify-out/
+.codex/
+AGENTS.md
