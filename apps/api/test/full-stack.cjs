@@ -29,6 +29,12 @@ async function main() {
     await Promise.all([ready('http://127.0.0.1:3001/api/v1/health'),ready('http://127.0.0.1:3000/')]);
     const page = await fetch('http://127.0.0.1:3000/');
     assert.match(await page.text(),/Sign in/);
+    const observabilityPage = await fetch('http://127.0.0.1:3000/observability');
+    assert.equal(observabilityPage.status,200);
+    assert.match(await observabilityPage.text(),/Logs/);
+    const websitePage = await fetch('http://127.0.0.1:3000/websites');
+    assert.equal(websitePage.status,200);
+    assert.match(await websitePage.text(),/Website builder/);
     const login = await fetch('http://127.0.0.1:3000/api/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email,password})});
     assert.equal(login.status,201);
     const cookie = login.headers.get('set-cookie').split(';')[0];
@@ -39,7 +45,10 @@ async function main() {
     assert.equal(selected.status,201);
     const me = await fetch('http://127.0.0.1:3000/api/v1/me',{headers:{cookie}});
     assert.equal((await me.json()).organizationId,organizationId);
-    console.log('Full-stack smoke passed: web page, API proxy, login cookie, organization list and switch');
+    const metrics = await fetch('http://127.0.0.1:3000/api/v1/observability/metrics',{headers:{cookie}});
+    assert.equal(metrics.status,200);
+    assert.ok((await metrics.json()).requests>=0);
+    console.log('Full-stack smoke passed: web pages, API proxy, login cookie, organization list/switch and observability metrics');
   } finally {
     api.kill(); web.kill();
     await db.query('DELETE FROM sessions WHERE user_id=$1',[ownerId]);

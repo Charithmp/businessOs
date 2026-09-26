@@ -1,8 +1,9 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { randomBytes, randomUUID, scryptSync, createHash, timingSafeEqual } from 'node:crypto';
 import { Pool, PoolClient } from 'pg';
+import { safeText } from '../observability/redaction';
 
-export type AuthRequest = { headers: { cookie?: string; origin?: string; host?: string }; method: string; user?: { id: string; email: string; sessionId: string; organizationId: string | null } };
+export type AuthRequest = { headers: { cookie?: string; origin?: string; host?: string; traceparent?: string }; method: string; user?: { id: string; email: string; sessionId: string; organizationId: string | null } };
 const ROLE = { OWNER: '00000000-0000-4000-8000-000000000001', ADMIN: '00000000-0000-4000-8000-000000000002', MEMBER: '00000000-0000-4000-8000-000000000003' } as const;
 const hashToken = (value: string) => createHash('sha256').update(value).digest('hex');
 const hashPassword = (value: string) => { const salt = randomBytes(16).toString('hex'); return `${salt}:${scryptSync(value, salt, 64).toString('hex')}`; };
@@ -40,7 +41,11 @@ export class IdentityService {
   async authenticate(request: AuthRequest) {
     if (!['GET','HEAD','OPTIONS'].includes(request.method)) {
       const origin = request.headers.origin;
-      if (origin && new URL(origin).host !== request.headers.host) throw new ForbiddenException('Invalid origin');
+      if (origin) {
+        const configuredOrigins = (process.env.WEB_ORIGIN ?? 'http://localhost:3000,http://127.0.0.1:3000').split(',').map((value) => value.trim()).filter(Boolean);
+        const allowedHosts = new Set([request.headers.host, ...configuredOrigins.map((value) => new URL(value).host)]);
+        if (!allowedHosts.has(new URL(origin).host)) throw new ForbiddenException('Invalid origin');
+      }
     }
     const token = request.headers.cookie?.split(';').map((item) => item.trim()).find((item) => item.startsWith('bos_session='))?.slice(12);
     if (!token) throw new UnauthorizedException();
@@ -99,9 +104,44 @@ export class IdentityService {
     return user.id;
   }
 
+  async requireWebsiteEditor(request: AuthRequest, businessId: string) {
+    const user = request.user ?? await this.authenticate(request);
+    const target = await this.db.query<{ parent_id:string|null }>("SELECT parent_id FROM organizations WHERE id=$1 AND type='BUSINESS' AND status='ACTIVE'",[businessId]);
+    if (!target.rows[0]) throw new NotFoundException('Business not found');
+    const direct = await this.membership(user.id,businessId);
+    if (direct && ['OWNER','ADMIN'].includes(direct.role)) return user.id;
+    if (target.rows[0].parent_id) {
+      const agency = await this.membership(user.id,target.rows[0].parent_id);
+      if (agency?.type==='AGENCY' && ['OWNER','ADMIN'].includes(agency.role)) return user.id;
+    }
+    const platform = await this.db.query("SELECT 1 FROM organizations o JOIN organization_members m ON m.organization_id=o.id JOIN roles r ON r.id=m.role_id WHERE o.type='PLATFORM' AND o.status='ACTIVE' AND m.user_id=$1 AND r.key='OWNER' LIMIT 1",[user.id]);
+    if (platform.rowCount) return user.id;
+    throw new ForbiddenException('Website editor role required');
+  }
+
+  async requireLogViewer(request: AuthRequest, organizationId?: string) {
+    const user = request.user ?? await this.authenticate(request);
+    const platform = await this.db.query("SELECT 1 FROM organizations o JOIN organization_members m ON m.organization_id=o.id JOIN roles r ON r.id=m.role_id WHERE o.type='PLATFORM' AND o.status='ACTIVE' AND m.user_id=$1 AND r.key='OWNER' LIMIT 1",[user.id]);
+    if (platform.rowCount) return user.id;
+    if (!organizationId) throw new ForbiddenException('Platform owner role required for global logs');
+    const target = await this.db.query<{ type:string; parent_id:string|null }>("SELECT type,parent_id FROM organizations WHERE id=$1 AND status='ACTIVE'",[organizationId]);
+    if (!target.rows[0]) throw new NotFoundException('Organization not found');
+    const direct = await this.membership(user.id,organizationId);
+    if (direct?.role === 'OWNER') return user.id;
+    if (target.rows[0].type === 'BUSINESS' && target.rows[0].parent_id) {
+      const agency = await this.membership(user.id,target.rows[0].parent_id);
+      if (agency?.type === 'AGENCY' && agency.role === 'OWNER') return user.id;
+    }
+    throw new ForbiddenException('Audit access denied');
+  }
+
   private async access(userId: string, orgId: string, permission: string, support = true) {
     const direct = await this.membership(userId, orgId);
     if (direct) {
+      // Owners retain full access to the organization they own. This also keeps
+      // a bootstrap owner usable if a database was initialized before the
+      // role-permission seed rows were applied.
+      if (direct.role === 'OWNER') return direct.role;
       const found = await this.db.query('SELECT 1 FROM role_permissions rp JOIN roles r ON r.id=rp.role_id WHERE r.key=$1 AND rp.permission_key=$2', [direct.role, permission]);
       if (found.rowCount) return direct.role;
     }
@@ -184,7 +224,7 @@ export class IdentityService {
     const id = randomUUID();
     await this.transaction(async (client) => {
       await client.query("INSERT INTO support_access(id,user_id,organization_id,reason,expires_at) VALUES($1,$2,$3,$4,now()+($5::int * interval '1 minute'))", [id,user.id,orgId,reason,minutes]);
-      await client.query('INSERT INTO audit_logs(id,organization_id,actor_user_id,action,resource_type,resource_id,reason) VALUES($1,$2,$3,$4,$5,$6,$7)', [randomUUID(),orgId,user.id,'support_access.granted','support_access',id,reason]);
+      await client.query('INSERT INTO audit_logs(id,organization_id,actor_user_id,action,resource_type,resource_id,reason) VALUES($1,$2,$3,$4,$5,$6,$7)', [randomUUID(),orgId,user.id,'support_access.granted','support_access',id,safeText(reason)]);
     });
     return { id, organizationId: orgId, minutes };
   }

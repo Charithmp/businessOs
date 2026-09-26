@@ -1,1 +1,27 @@
 :root { font-family: Arial, sans-serif; color: #111827; background: #f8fafc; } body { margin: 0; } main { max-width: 42rem; margin: 5rem auto; padding: 2rem; } h1 { font-size: 3rem; } section,form { display: grid; gap: 0.75rem; background: white; padding: 2rem; border: 1px solid #d9e0e8; border-radius: 0.75rem; } input,select,button { font: inherit; padding: 0.75rem; } button { width: fit-content; cursor: pointer; } [role=alert] { color: #b91c1c; }
+main.wide { max-width: 82rem; margin: 2rem auto; }
+.filter-grid { grid-template-columns: repeat(auto-fit,minmax(11rem,1fr)); align-items: end; }
+.filter-grid label { display: grid; gap: .4rem; }
+.filter-grid input,.filter-grid select { width: 100%; box-sizing: border-box; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit,minmax(10rem,1fr)); margin-top: 1rem; }
+.metrics div { display: grid; gap: .4rem; }
+.metrics strong { font-size: 1.6rem; }
+.metrics span { color: #475569; }
+.log-section { margin-top: 1rem; }
+.table-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; text-align: left; }
+th,td { padding: .7rem; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+th { white-space: nowrap; }
+.builder { max-width: 96rem; }
+.builder-panel { margin: 1rem 0; padding: 1.5rem; }
+.builder-row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+.builder-row h2,.builder-row h3 { margin-right: auto; }
+.builder-layout { display: grid; grid-template-columns: minmax(18rem,1fr) minmax(20rem,2fr); gap: 1rem; }
+.builder-layout .builder-panel { min-width: 0; align-content: start; }
+.builder-block { display: block; width: 100%; text-align: left; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: .3rem; }
+.builder-block.active { border-color: #2563eb; background: #eff6ff; }
+.builder-field { display: grid; gap: .3rem; }
+.builder textarea { width: 100%; min-height: 8rem; box-sizing: border-box; font: inherit; padding: .75rem; }
+.site-preview { border: 1px solid #cbd5e1; height: 42rem; width: 100%; background: white; }
+.site-preview.tablet { max-width: 768px; }.site-preview.mobile { max-width: 390px; }
+@media(max-width: 900px) { .builder-layout { grid-template-columns: 1fr; } }

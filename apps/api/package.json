@@ -12,18 +12,27 @@
     "bootstrap": "node --env-file=../../.env scripts/bootstrap.cjs",
     "test:e2e": "node --env-file=../../.env test/e2e.cjs",
     "test:full-stack": "node --env-file=../../.env test/full-stack.cjs",
-    "test:commercial-e2e": "node --env-file=../../.env test/commercial-e2e.cjs"
+    "test:commercial-e2e": "node --env-file=../../.env test/commercial-e2e.cjs",
+    "test:observability-e2e": "node --env-file=../../.env test/observability-e2e.cjs",
+    "test:websites-e2e": "node --env-file=../../.env test/websites-e2e.cjs"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",
     "@nestjs/core": "^10.4.15",
     "@nestjs/platform-express": "^10.4.15",
     "@nestjs/swagger": "^7.4.2",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.222.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.222.0",
+    "@opentelemetry/sdk-metrics": "^2.11.0",
+    "@opentelemetry/sdk-node": "^0.222.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
+    "htmlparser2": "^10.1.0",
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "sanitize-html": "^2.14.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.9",
@@ -31,6 +40,7 @@
     "@types/jest": "^29.5.14",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.23.1",
+    "@types/sanitize-html": "^2.16.1",
     "@typescript-eslint/eslint-plugin": "^8.70.0",
     "@typescript-eslint/parser": "^8.70.0",
     "eslint": "^8.57.1",

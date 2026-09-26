@@ -55,7 +55,10 @@ async function main() {
     assert.equal((await call('POST','/usage',{featureKey:feature.data.key,quantity:1,idempotencyKey:'third'},business)).status,403);
     assert.equal((await call('PUT','/subscriptions',{organizationId:ids.business,packageVersionId:pkg.data.version.id,status:'SUSPENDED',reason:'Test suspension'},agency)).status,200);
     const history = await db.query('SELECT action FROM subscription_history WHERE subscription_id=$1',[subscription.data.id]); assert.equal(history.rowCount,4);
-    const audit = await db.query("SELECT action FROM audit_logs WHERE organization_id=$1 AND action LIKE 'subscription.%'",[ids.business]); assert.equal(audit.rowCount,4);
+    const audit = await db.query("SELECT action,before_state,after_state FROM audit_logs WHERE organization_id=$1 AND action LIKE 'subscription.%'",[ids.business]); assert.equal(audit.rowCount,4);
+    assert.equal(audit.rows.find((row)=>row.action==='subscription.created').after_state.status,'ACTIVE');
+    assert.equal(audit.rows.find((row)=>row.action==='subscription.changed').before_state.status,'ACTIVE');
+    assert.equal(audit.rows.find((row)=>row.action==='subscription.changed').after_state.status,'SUSPENDED');
     console.log('Phase 2 end-to-end checks passed: catalog authorization, package version pinning, subscriptions, tenant isolation, entitlement resolution, add-ons, overrides, usage limits/idempotency, suspension, history and audit');
   } finally {
     if (app) await app.close();
@@ -65,7 +68,6 @@ async function main() {
     await db.query('DELETE FROM subscription_overrides WHERE subscription_id IN (SELECT id FROM subscriptions WHERE organization_id=ANY($1::uuid[]))',[[ids.business,ids.other]]);
     await db.query('DELETE FROM subscription_add_ons WHERE subscription_id IN (SELECT id FROM subscriptions WHERE organization_id=ANY($1::uuid[]))',[[ids.business,ids.other]]);
     await db.query('DELETE FROM subscriptions WHERE organization_id=ANY($1::uuid[])',[[ids.business,ids.other]]);
-    await db.query('DELETE FROM audit_logs WHERE organization_id=ANY($1::uuid[])',[[ids.platform,ids.agency,ids.business,ids.other]]);
     await db.query('DELETE FROM add_on_features WHERE add_on_id=ANY($1::uuid[])',[catalog.addOns]);
     await db.query('DELETE FROM add_ons WHERE id=ANY($1::uuid[])',[catalog.addOns]);
     await db.query('DELETE FROM package_features WHERE package_version_id IN (SELECT id FROM package_versions WHERE package_id=ANY($1::uuid[]))',[catalog.packages]);
