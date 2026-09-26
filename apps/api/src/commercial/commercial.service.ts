@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { Pool, PoolClient } from 'pg';
 import { AuthRequest, IdentityService } from '../identity/identity.service';
 import { redisCommand } from './redis-cache';
+import { safeText } from '../observability/redaction';
 
 type FeatureGrant = { key: string; enabled: boolean; limit: number | null; used: number };
 type PackageInput = { key: string; name: string; features: { key: string; limit?: number | null }[] };
@@ -21,8 +22,8 @@ export class CommercialService {
     catch (error) { await client.query('ROLLBACK'); throw error; }
     finally { client.release(); }
   }
-  private async audit(client: PoolClient, orgId: string, actorId: string, action: string, resourceType: string, resourceId: string, reason?: string) {
-    await client.query('INSERT INTO audit_logs(id,organization_id,actor_user_id,action,resource_type,resource_id,reason) VALUES($1,$2,$3,$4,$5,$6,$7)',[randomUUID(),orgId,actorId,action,resourceType,resourceId,reason ?? null]);
+  private async audit(client: PoolClient, orgId: string, actorId: string, action: string, resourceType: string, resourceId: string, reason?: string, before?: unknown, after?: unknown) {
+    await client.query('INSERT INTO audit_logs(id,organization_id,actor_user_id,action,resource_type,resource_id,reason,before_state,after_state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[randomUUID(),orgId,actorId,action,resourceType,resourceId,safeText(reason),before ?? null,after ?? null]);
   }
   private conflict(error: unknown): never {
     if ((error as { code?: string }).code === '23505') throw new ConflictException('Key or version already exists');
@@ -109,8 +110,8 @@ export class CommercialService {
       await db.query(`INSERT INTO subscriptions(id,organization_id,package_version_id,status,trial_ends_at) VALUES($1,$2,$3,$4,$5)
         ON CONFLICT(organization_id) DO UPDATE SET package_version_id=EXCLUDED.package_version_id,status=EXCLUDED.status,trial_ends_at=EXCLUDED.trial_ends_at,updated_at=now()`,[subscriptionId,input.organizationId,input.packageVersionId,input.status,input.trialEndsAt ?? null]);
       const after = await db.query('SELECT * FROM subscriptions WHERE id=$1',[subscriptionId]);
-      await db.query('INSERT INTO subscription_history(id,subscription_id,actor_user_id,action,before_state,after_state,reason) VALUES($1,$2,$3,$4,$5,$6,$7)',[randomUUID(),subscriptionId,actorId,previous.rowCount?'subscription.changed':'subscription.created',previous.rows[0] ?? null,after.rows[0],input.reason ?? null]);
-      await this.audit(db,input.organizationId,actorId,previous.rowCount?'subscription.changed':'subscription.created','subscription',subscriptionId,input.reason);
+      await db.query('INSERT INTO subscription_history(id,subscription_id,actor_user_id,action,before_state,after_state,reason) VALUES($1,$2,$3,$4,$5,$6,$7)',[randomUUID(),subscriptionId,actorId,previous.rowCount?'subscription.changed':'subscription.created',previous.rows[0] ?? null,after.rows[0],safeText(input.reason)]);
+      await this.audit(db,input.organizationId,actorId,previous.rowCount?'subscription.changed':'subscription.created','subscription',subscriptionId,input.reason,previous.rows[0] ?? null,after.rows[0]);
       return subscriptionId;
     });
     await this.invalidate(input.organizationId);
@@ -129,11 +130,12 @@ export class CommercialService {
       if (!sub.rowCount) throw new NotFoundException('Subscription not found');
       const addon = await db.query('SELECT id FROM add_ons WHERE id=$1 AND active=true',[addOnId]);
       if (!addon.rowCount) throw new NotFoundException('Add-on not found');
+      const prior = await db.query('SELECT 1 FROM subscription_add_ons WHERE subscription_id=$1 AND add_on_id=$2',[sub.rows[0].id,addOnId]);
       if (enabled) await db.query('INSERT INTO subscription_add_ons(subscription_id,add_on_id) VALUES($1,$2) ON CONFLICT DO NOTHING',[sub.rows[0].id,addOnId]);
       else await db.query('DELETE FROM subscription_add_ons WHERE subscription_id=$1 AND add_on_id=$2',[sub.rows[0].id,addOnId]);
       const after = { addOnId,enabled };
-      await db.query('INSERT INTO subscription_history(id,subscription_id,actor_user_id,action,after_state,reason) VALUES($1,$2,$3,$4,$5,$6)',[randomUUID(),sub.rows[0].id,actorId,'subscription.add_on.changed',after,reason ?? null]);
-      await this.audit(db,orgId,actorId,'subscription.add_on.changed','subscription',sub.rows[0].id,reason);
+      await db.query('INSERT INTO subscription_history(id,subscription_id,actor_user_id,action,after_state,reason) VALUES($1,$2,$3,$4,$5,$6)',[randomUUID(),sub.rows[0].id,actorId,'subscription.add_on.changed',after,safeText(reason)]);
+      await this.audit(db,orgId,actorId,'subscription.add_on.changed','subscription',sub.rows[0].id,reason,{ addOnId,enabled:!!prior.rowCount },after);
     });
     await this.invalidate(orgId);
     return this.entitlements(request,orgId);
@@ -145,9 +147,10 @@ export class CommercialService {
       if (!sub.rowCount) throw new NotFoundException('Subscription not found');
       const feature = await db.query('SELECT id FROM features WHERE key=$1 AND active=true',[featureKey]);
       if (!feature.rowCount) throw new NotFoundException('Feature not found');
+      const prior = await db.query('SELECT enabled,usage_limit FROM subscription_overrides WHERE subscription_id=$1 AND feature_id=$2',[sub.rows[0].id,feature.rows[0].id]);
       await db.query('INSERT INTO subscription_overrides(subscription_id,feature_id,enabled,usage_limit) VALUES($1,$2,$3,$4) ON CONFLICT(subscription_id,feature_id) DO UPDATE SET enabled=EXCLUDED.enabled,usage_limit=EXCLUDED.usage_limit',[sub.rows[0].id,feature.rows[0].id,enabled,limit]);
-      await db.query('INSERT INTO subscription_history(id,subscription_id,actor_user_id,action,after_state,reason) VALUES($1,$2,$3,$4,$5,$6)',[randomUUID(),sub.rows[0].id,actorId,'subscription.override.changed',{ featureKey,enabled,limit },reason ?? null]);
-      await this.audit(db,orgId,actorId,'subscription.override.changed','subscription',sub.rows[0].id,reason);
+      await db.query('INSERT INTO subscription_history(id,subscription_id,actor_user_id,action,after_state,reason) VALUES($1,$2,$3,$4,$5,$6)',[randomUUID(),sub.rows[0].id,actorId,'subscription.override.changed',{ featureKey,enabled,limit },safeText(reason)]);
+      await this.audit(db,orgId,actorId,'subscription.override.changed','subscription',sub.rows[0].id,reason,prior.rows[0] ?? null,{ featureKey,enabled,limit });
     });
     await this.invalidate(orgId);
     return this.entitlements(request,orgId);
@@ -185,6 +188,10 @@ export class CommercialService {
       try { await redisCommand(['SET',this.key(target),JSON.stringify(value),'EX','60']); } catch { /* Cache is optional. */ }
     }
     return value;
+  }
+  async hasFeature(orgId:string, key:string) {
+    const value = await this.resolve(this.db,orgId);
+    return value.features.some((item)=>item.key===key && item.enabled && (item.limit===null || item.used<item.limit));
   }
   async recordUsage(request: AuthRequest, input: { featureKey: string; quantity: number; idempotencyKey: string }) {
     const orgId = request.user?.organizationId;

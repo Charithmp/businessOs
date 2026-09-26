@@ -72,6 +72,7 @@ async function main() {
     assert.equal((await call('POST','/organizations/switch',{organizationId:businessB.data.id},aLogin.cookie)).status,403);
     assert.equal((await call('POST','/organizations/switch',{organizationId:businessA.data.id},aLogin.cookie)).status,201);
     assert.equal((await call('GET','/me',undefined,aLogin.cookie)).data.organizationId,businessA.data.id);
+    assert.equal((await call('POST','/organizations/switch',{organizationId:businessA.data.id},aLogin.cookie,'http://localhost:3000')).status,201);
     assert.equal((await call('POST',`/organizations/${businessB.data.id}/members`,{email:`a-${tag}@example.test`,role:'OWNER'},aLogin.cookie)).status,403);
     assert.equal((await call('POST','/organizations/switch',{organizationId:businessA.data.id},aLogin.cookie,'https://evil.example')).status,403);
     const refreshed = await call('POST','/auth/refresh',undefined,bLogin.cookie);
@@ -100,7 +101,6 @@ async function main() {
     const userIds = users.rows.map((row)=>row.id);
     if (userIds.length) await db.query('DELETE FROM sessions WHERE user_id=ANY($1::uuid[])',[userIds]);
     if (ids.length) {
-      await db.query('DELETE FROM audit_logs WHERE organization_id=ANY($1::uuid[])',[ids]);
       await db.query('DELETE FROM support_access WHERE organization_id=ANY($1::uuid[])',[ids]);
       await db.query('DELETE FROM organization_members WHERE organization_id=ANY($1::uuid[])',[ids]);
       for (const type of ['BUSINESS','AGENCY','PLATFORM']) await db.query('DELETE FROM organizations WHERE id=ANY($1::uuid[]) AND type=$2',[ids,type]);

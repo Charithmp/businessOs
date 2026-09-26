@@ -12,6 +12,8 @@ export default function Home() {
   const [password,setPassword] = useState('');
   const [error,setError] = useState('');
   const [busy,setBusy] = useState(false);
+  const [organizationName,setOrganizationName] = useState('');
+  const [organizationSlug,setOrganizationSlug] = useState('');
 
   async function load() {
     const me = await fetch('/api/v1/me',{ credentials:'same-origin' });
@@ -35,9 +37,30 @@ export default function Home() {
     setBusy(true); setError('');
     try {
       const response = await fetch('/api/v1/organizations/switch',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({organizationId:id})});
-      if (!response.ok) throw new Error('You do not have access to that organization');
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.message ?? 'You do not have access to that organization');
+      }
       await load();
     } catch (cause) { setError(cause instanceof Error?cause.message:'Unable to switch organization'); }
+    finally { setBusy(false); }
+  }
+  async function createOrganization(type: 'AGENCY' | 'BUSINESS') {
+    const parentId = profile?.organizationId;
+    if (!parentId) return;
+    setBusy(true); setError('');
+    try {
+      const response = await fetch('/api/v1/organizations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ parentId, type, name: organizationName, slug: organizationSlug }) });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.message ?? `Unable to create ${type.toLowerCase()}`);
+      }
+      const created = await response.json() as Organization;
+      const switched = await fetch('/api/v1/organizations/switch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationId: created.id }) });
+      if (!switched.ok) throw new Error(`Created ${type.toLowerCase()}, but could not select it`);
+      setOrganizationName(''); setOrganizationSlug('');
+      await load();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to create organization'); }
     finally { setBusy(false); }
   }
   async function logout() { await fetch('/api/v1/auth/logout',{method:'POST'}); setProfile(null); setOrganizations([]); }
@@ -52,6 +75,20 @@ export default function Home() {
         {organizations.map((organization)=><option value={organization.id} key={organization.id}>{organization.name} ({organization.type})</option>)}
       </select>
       <button onClick={()=>void logout()}>Sign out</button>
+      <a href="/observability">Logs &amp; audit</a>
+      <a href="/websites">Website builder</a>
+      {(() => {
+        const selected = organizations.find((organization) => organization.id === profile.organizationId);
+        const nextType = selected?.type === 'PLATFORM' ? 'AGENCY' : selected?.type === 'AGENCY' ? 'BUSINESS' : null;
+        if (!nextType) return null;
+        return <section>
+          <h2>Create {nextType === 'AGENCY' ? 'an agency' : 'a business'}</h2>
+          <p>{nextType === 'AGENCY' ? 'Create an agency before creating businesses and websites.' : 'Create a business, then open Website builder.'}</p>
+          <label htmlFor="organization-name">Name</label><input id="organization-name" value={organizationName} onChange={(event)=>setOrganizationName(event.target.value)} />
+          <label htmlFor="organization-slug">Slug</label><input id="organization-slug" value={organizationSlug} onChange={(event)=>setOrganizationSlug(event.target.value)} placeholder="lowercase-name" />
+          <button disabled={busy || !organizationName.trim() || !organizationSlug.trim()} onClick={()=>void createOrganization(nextType)}>Create {nextType.toLowerCase()}</button>
+        </section>;
+      })()}
     </section> : <form onSubmit={(event)=>void login(event)}>
       <h2>Sign in</h2>
       <label htmlFor="email">Email</label><input id="email" type="email" value={email} onChange={(event)=>setEmail(event.target.value)} required />

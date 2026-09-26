@@ -36,3 +36,5 @@ jobs:
       - run: pnpm --filter @business-os/api test:e2e
       - run: pnpm --filter @business-os/api test:full-stack
       - run: pnpm --filter @business-os/api test:commercial-e2e
+      - run: pnpm --filter @business-os/api test:observability-e2e
+      - run: pnpm --filter @business-os/api test:websites-e2e
